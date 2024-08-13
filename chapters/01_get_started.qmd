@@ -1,0 +1,240 @@
+---
+title: "Get started"
+author: "Thomas Sandmann"
+date: "2024-08-13"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+suppressMessages({
+  library(marginaleffects)
+  library(ragg)
+  library(tinytable)
+})
+options(marginaleffects_print_style = "tinytable")
+options("tinytable_theme_placement_latex_float" = "H")
+```
+
+Every analysis starts with a model, e.g. a linear regression:
+
+```{r}
+mod <- lm(mpg ~ hp * wt * am, data = mtcars)
+```
+
+## Predictions
+
+`predictions()` returns unit-level estimates, so there is one specific
+prediction per observation.
+
+```{r}
+pre <- predictions(mod)
+stopifnot(nrow(mtcars) == nrow(pre))
+pre
+```
+
+## Comparisons
+
+By default, `comparisons()` computes the difference in predicted outcome when
+each of the predictors is incremented by 1 unit. Since there are 3 main effects
+in the model and our data has 32 rows, we obtain 96 comparisons:
+
+```{r}
+cmp <- comparisons(mod)
+stopifnot(3 * nrow(mtcars) == nrow(cmp))
+cmp
+```
+
+We can also customize the change in one or more variables, e.g. raise the `hp`
+predictor from 100 to 120:
+
+```{r}
+comparisons(mod, variables = list(hp = c(120, 100)))
+```
+
+or vary it by one standard deviation (sd) around its mean:
+
+```{r}
+comparisons(mod, variables = list(hp = "sd"))
+```
+
+Finally, we can also transform the predictions, e.g. calculate the predicted
+ratio between `mpg` and `hp` after in increase in `hp` by 50 units over its
+mean:
+
+```{r}
+comparisons(
+  mod,
+  variables = list(hp = 50),
+  comparison = "ratioavg")
+```
+
+## Slopes
+
+The `slopes()` function computes the partial derivative of the outcome with 
+respect to each of the predictors. Again, there are three main effects, so 
+we obtain 96 slopes:
+
+```{r}
+mfx <- slopes(mod)
+stopifnot(3 * nrow(mod) == nrow(mfx))
+mfx
+```
+
+Above, all of the predictions were returned for the data points that were
+actually in the input, e.g. the observed combinations of values. We can also
+obtain predictions, comparisons and slopes for other (e.g. unobserved) predictor
+combinations. The `newdata` argument accepts either the output of the
+[datagrid()](https://marginaleffects.com/man/datagrid.html)
+function, or a predefined option (e.g. `mean` or `median` for each
+predictor).
+
+For example, the following call returns the partial derivative of `mpg` with
+respect to `wt`, when `am` is equal to 0 and 1, while other predictors are
+held at their means:
+
+```{r}
+slopes(mod, variables = "wt", newdata = datagrid(am = 0:1))
+```
+## Plotting
+
+To plot predictions, three functions are available: `plot_predictions()`,
+`plot_comparisons()` and `plot_slopes()`.
+
+This plot shows the outcomes predicted by our model for different values of
+the `wt` (varied by 1 SD around its mean) and `am` (categorical 0/1) variables:
+```{r}
+plot_predictions(mod, condition = list("hp", "wt" = "threenum", "am"))
+```
+
+## Aggregation
+
+Sometimes, we are not interested in predicting individual data points, but an average of unit-level estimates. The {marginaleffects} package offers 
+to ways to calculate the averages:
+
+1. using the `by` argument to the functions introduced above or
+2. specialized functions `avg_predictions()`, `avg_comparisons()`, and 
+`avg_slopes()`.
+
+The following expressions are equivalent and return the mean across all
+predicted `mpg` values (at the predictor levels of the observations):
+
+```{r}
+avg_predictions(mod)
+```
+
+and
+
+```{r}
+mean(predict(mod))
+```
+
+We can also average within subgroups, e.g. the two levels of the `am` predictor:
+
+```{r}
+avg_predictions(mod, by = "am")
+```
+
+The same approach returns the predicted comparisons, split by `am`:
+
+```{r}
+avg_comparisons(mod, by = "am")
+```
+
+::: {callout-note}
+
+### Marginal Means
+
+`Marginal Means` are a special case of predictions, which are marginalized
+(or averaged) across a balanced grid of categorical predictors. See the
+[Marginal Means vignette](https://marginaleffects.com/vignettes/marginalmeans.html)
+for details.
+
+:::
+
+## Tests
+
+The `hypotheses()` function and the `hypothesis` argument can be used to
+perform tests on model coefficients - or any of the other quantities (e.g.
+comparisons or slopes).
+
+```{r}
+mod <- lm(mpg ~ qsec * drat, data = mtcars)
+coef(mod)
+```
+
+Can we reject the null hypothesis that the drat coefficient is 2 times the size of the qsec coefficient?
+
+```{r}
+hypotheses(mod, "drat = 2 * qsec")
+```
+
+We can ask the same question but refer to parameters by position, with
+indices b1, b2, b3, etc.:
+
+```{r}
+hypotheses(mod, "b3 = 2 * b2")
+```
+
+The main functions in {marginaleffects} all have a hypothesis argument, which
+means that we can do complex model testing. For example, consider two slope
+estimates at both ends of the `qsec` range:
+
+```{r}
+# mean drat, min and max for qsec
+grid <- datagrid(model = mod, qsec = range)
+grid
+```
+
+```{r}
+slopes(
+  mod,
+  variables = "drat",
+  newdata = grid)
+```
+
+Are these two slopes significantly different from one another? To test this,
+we can use the hypothesis argument:
+
+```{r}
+slopes(
+  mod,
+  hypothesis = "b1 = b2",  # terms by position, as they are not unique
+  variables = "drat",
+  newdata = grid)
+```
+
+When a function returns Terms with unique names, we can also refer to values
+by name:
+
+```{r}
+avg_slopes(mod)
+```
+
+```{r}
+avg_slopes(mod, hypothesis = "drat = qsec")
+```
+
+Finally, the `equivalence` argument allows us to conduct an equivalence test:
+
+```{r}
+avg_slopes(mod, equivalence = c(-2, 2))
+```
+
+## Reproducibility
+
+<details>
+<summary>
+Session information
+</summary>
+
+```{r}
+sessionInfo()
+```
+
+</details>
